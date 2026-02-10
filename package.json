@@ -1,0 +1,29 @@
+{
+  "name": "xhs-cli",
+  "version": "1.0.0",
+  "description": "小红书命令行工具",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "xhs": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["xiaohongshu", "cli", "playwright"],
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "ora": "^8.0.1",
+    "playwright": "^1.41.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
