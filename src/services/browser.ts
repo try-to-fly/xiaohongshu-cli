@@ -1,5 +1,6 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { loadCookies, saveCookies } from '../utils/cookies.js';
+import { debugBrowser } from '../utils/debug.js';
 
 export class BrowserService {
   private browser: Browser | null = null;
@@ -9,6 +10,8 @@ export class BrowserService {
   async init(options: { headless?: boolean; cookiePath?: string } = {}): Promise<Page> {
     const { headless = true, cookiePath } = options;
 
+    debugBrowser('启动浏览器, headless: %s', headless);
+
     this.browser = await chromium.launch({
       headless,
       args: [
@@ -17,6 +20,8 @@ export class BrowserService {
         '--disable-setuid-sandbox',
       ],
     });
+
+    debugBrowser('浏览器启动成功');
 
     this.context = await this.browser.newContext({
       viewport: { width: 1920, height: 1080 },
@@ -31,11 +36,11 @@ export class BrowserService {
       Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
     });
 
-    if (cookiePath) {
-      await loadCookies(this.context, cookiePath);
-    } else {
-      await loadCookies(this.context);
-    }
+    const cookieLoaded = cookiePath
+      ? await loadCookies(this.context, cookiePath)
+      : await loadCookies(this.context);
+
+    debugBrowser('Cookie 加载结果: %s', cookieLoaded);
 
     this.page = await this.context.newPage();
     return this.page;

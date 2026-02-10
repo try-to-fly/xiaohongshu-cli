@@ -1,6 +1,7 @@
 import type { Page } from 'playwright';
 import { sleep } from '../utils/helpers.js';
 import type { Feed, SearchFilters } from '../types/index.js';
+import { debugSearch } from '../utils/debug.js';
 
 const FILTER_MAP: Record<string, { group: number; options: Record<string, number> }> = {
   sortBy: {
@@ -25,8 +26,35 @@ export async function search(
   filters: SearchFilters = {}
 ): Promise<Feed[]> {
   const url = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_explore_feed`;
+  debugSearch('搜索关键词: %s', keyword);
+  debugSearch('搜索URL: %s', url);
+  debugSearch('筛选条件: %O', filters);
+
   await page.goto(url);
+
+  // 检查是否被重定向
+  const currentUrl = page.url();
+  debugSearch('导航后当前URL: %s', currentUrl);
+  if (currentUrl !== url) {
+    debugSearch('警告: URL发生变化，可能被重定向');
+  }
+
   await page.waitForFunction(() => (window as any).__INITIAL_STATE__ !== undefined);
+  debugSearch('__INITIAL_STATE__ 已加载');
+
+  // 等待搜索结果加载（最多等待 10 秒）
+  await page.waitForFunction(
+    () => {
+      const state = (window as any).__INITIAL_STATE__;
+      const feeds = state?.search?.feeds;
+      if (!feeds) return false;
+      const data = feeds._rawValue ?? feeds._value ?? feeds.value ?? [];
+      return Array.isArray(data) && data.length > 0;
+    },
+    { timeout: 10000 }
+  ).catch(() => {
+    debugSearch('等待 feeds 数据超时，继续尝试提取');
+  });
 
   if (Object.keys(filters).length > 0) {
     await page.hover('div.filter');
@@ -47,11 +75,46 @@ export async function search(
 
   const feeds = await page.evaluate(() => {
     const state = (window as any).__INITIAL_STATE__;
+
+    // 调试: 记录顶层 keys
+    const topKeys = Object.keys(state || {});
+    console.log('[xhs:search] __INITIAL_STATE__ 顶层 keys:', topKeys);
+
+    // 调试: 记录 search 对象结构
+    if (state?.search) {
+      console.log('[xhs:search] state.search keys:', Object.keys(state.search));
+      console.log('[xhs:search] state.search.feeds 类型:', typeof state.search.feeds);
+      if (state.search.feeds) {
+        console.log('[xhs:search] state.search.feeds keys:', Object.keys(state.search.feeds));
+      }
+    } else {
+      console.log('[xhs:search] state.search 不存在');
+    }
+
     if (state?.search?.feeds) {
-      return state.search.feeds.value ?? state.search.feeds._value ?? [];
+      const feedsData = state.search.feeds._rawValue ?? state.search.feeds._value ?? state.search.feeds.value ?? [];
+      console.log('[xhs:search] feeds 数量:', feedsData.length);
+      return feedsData;
     }
     return [];
   });
+
+  debugSearch('提取到 feeds 数量: %d', feeds.length);
+  if (feeds.length === 0) {
+    // 额外调试: 获取完整的 state 结构
+    const stateDebug = await page.evaluate(() => {
+      const state = (window as any).__INITIAL_STATE__;
+      return {
+        hasState: !!state,
+        topKeys: Object.keys(state || {}),
+        hasSearch: !!state?.search,
+        searchKeys: state?.search ? Object.keys(state.search) : [],
+        feedsType: state?.search?.feeds ? typeof state.search.feeds : 'undefined',
+        feedsKeys: state?.search?.feeds ? Object.keys(state.search.feeds) : [],
+      };
+    });
+    debugSearch('state 调试信息: %O', stateDebug);
+  }
 
   return feeds;
 }

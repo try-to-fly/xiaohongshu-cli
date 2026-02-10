@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/index.ts",
+    "dev": "DEBUG='xhs:*' tsx src/index.ts",
     "start": "node dist/index.js"
   },
   "keywords": [
@@ -21,6 +21,7 @@
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
+    "debug": "^4.4.3",
     "jsqr": "^1.4.0",
     "ora": "^8.0.1",
     "playwright": "^1.41.0",
@@ -28,6 +29,7 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@types/debug": "^4.1.12",
     "@types/node": "^20.11.0",
     "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.7.0",
