@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import { sleep, randomInt, getScrollInterval } from '../utils/helpers.js';
+import { waitForInitialState, waitForStateData, unwrapVueRef } from '../utils/state.js';
 import type { Feed, FeedDetail, CommentConfig } from '../types/index.js';
 
 export async function getFeedsList(page: Page): Promise<Feed[]> {
@@ -7,13 +8,16 @@ export async function getFeedsList(page: Page): Promise<Feed[]> {
   await page.waitForLoadState('domcontentloaded');
   await sleep(1000);
 
-  await page.waitForFunction(() => (window as any).__INITIAL_STATE__ !== undefined);
+  await waitForInitialState(page);
+
+  // 等待 feeds 数据加载
+  await waitForStateData(page, 'state?.feed?.feeds', 10000);
 
   const feeds = await page.evaluate(() => {
     const state = (window as any).__INITIAL_STATE__;
     if (state?.feed?.feeds) {
       const feeds = state.feed.feeds;
-      return feeds.value ?? feeds._value ?? [];
+      return feeds._rawValue ?? feeds._value ?? feeds.value ?? [];
     }
     return [];
   });
@@ -44,6 +48,11 @@ export async function getFeedDetail(
       }
     }
   }
+
+  await waitForInitialState(page);
+
+  // 等待笔记详情数据加载
+  await waitForStateData(page, `state?.note?.noteDetailMap?.['${feedId}']`, 10000);
 
   const detail = await page.evaluate((feedId: string) => {
     const noteDetailMap = (window as any).__INITIAL_STATE__?.note?.noteDetailMap;

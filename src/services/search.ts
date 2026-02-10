@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import { sleep } from '../utils/helpers.js';
+import { waitForInitialState, waitForStateData, unwrapVueRef } from '../utils/state.js';
 import type { Feed, SearchFilters } from '../types/index.js';
 import { debugSearch } from '../utils/debug.js';
 
@@ -39,22 +40,14 @@ export async function search(
     debugSearch('警告: URL发生变化，可能被重定向');
   }
 
-  await page.waitForFunction(() => (window as any).__INITIAL_STATE__ !== undefined);
+  await waitForInitialState(page);
   debugSearch('__INITIAL_STATE__ 已加载');
 
   // 等待搜索结果加载（最多等待 10 秒）
-  await page.waitForFunction(
-    () => {
-      const state = (window as any).__INITIAL_STATE__;
-      const feeds = state?.search?.feeds;
-      if (!feeds) return false;
-      const data = feeds._rawValue ?? feeds._value ?? feeds.value ?? [];
-      return Array.isArray(data) && data.length > 0;
-    },
-    { timeout: 10000 }
-  ).catch(() => {
+  const dataLoaded = await waitForStateData(page, 'state?.search?.feeds', 10000);
+  if (!dataLoaded) {
     debugSearch('等待 feeds 数据超时，继续尝试提取');
-  });
+  }
 
   if (Object.keys(filters).length > 0) {
     await page.hover('div.filter');
@@ -70,7 +63,7 @@ export async function search(
     }
 
     await page.waitForLoadState('networkidle');
-    await page.waitForFunction(() => (window as any).__INITIAL_STATE__ !== undefined);
+    await waitForInitialState(page);
   }
 
   const feeds = await page.evaluate(() => {

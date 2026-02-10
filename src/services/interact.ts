@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import { sleep } from '../utils/helpers.js';
+import { waitForInitialState, waitForStateData } from '../utils/state.js';
 
 export async function likeFeed(
   page: Page,
@@ -43,7 +44,10 @@ async function toggleInteract(
   const url = `https://www.xiaohongshu.com/explore/${feedId}?xsec_token=${xsecToken}&xsec_source=pc_feed`;
   await page.goto(url);
   await page.waitForLoadState('domcontentloaded');
-  await sleep(1000);
+  await waitForInitialState(page);
+
+  // 等待笔记详情数据加载
+  await waitForStateData(page, `state?.note?.noteDetailMap?.['${feedId}']`, 10000);
 
   const currentState = await page.evaluate((feedId: string) => {
     const detail = (window as any).__INITIAL_STATE__?.note?.noteDetailMap?.[feedId];
