@@ -581,163 +581,624 @@ function sleep(ms) {
 }
 ```
 
-### 3.6 发布图文
+### 3.6 发布图文（详细版）
 
 **页面 URL**: `https://creator.xiaohongshu.com/publish/publish?source=official`
 
-**控制流程**：
+**完整控制流程**：
 
 ```
-1. 打开发布页 → 2. 点击"上传图文"TAB → 3. 逐张上传图片 → 4. 输入标题 → 5. 输入正文 → 6. 输入标签 → 7. (可选)设置定时 → 8. 点击发布
+1. 导航到发布页面
+2. 等待页面加载完成（WaitLoad + WaitDOMStable）
+3. 点击"上传图文" TAB（处理弹窗遮挡）
+4. 逐张上传图片（等待每张上传完成）
+5. 输入标题（检查长度限制）
+6. 输入正文（检查长度限制）
+7. 输入标签（使用标签联想）
+8. (可选) 设置定时发布
+9. 点击发布按钮
 ```
 
-**关键 DOM 元素**：
-| 元素 | CSS 选择器 | 说明 |
-|------|------------|------|
-| 上传区域 | `div.upload-content` | 等待页面加载 |
-| TAB 按钮 | `div.creator-tab` | 文本为"上传图文" |
-| 首张图片上传 | `.upload-input` | 第一张图片的 input |
-| 后续图片上传 | `input[type="file"]` | 后续图片的 input |
-| 图片预览 | `.img-preview-area .pr` | 已上传图片预览 |
-| 标题输入框 | `div.d-input input` | 最大 20 个中文字 |
-| 正文输入框 | `div.ql-editor` | 富文本编辑器 |
-| 标签联想容器 | `#creator-editor-topic-container` | 标签下拉框 |
-| 标签联想选项 | `#creator-editor-topic-container .item` | 第一个联想选项 |
-| 定时开关 | `.post-time-wrapper .d-switch` | 定时发布开关 |
-| 定时输入框 | `.date-picker-container input` | 格式：YYYY-MM-DD HH:mm |
-| 发布按钮 | `.publish-page-publish-btn button.bg-red` | 红色发布按钮 |
-| 标题超长提示 | `div.title-container div.max_suffix` | 存在则超长 |
-| 正文超长提示 | `div.edit-container div.length-error` | 存在则超长 |
-
-**实现代码**：
+#### 3.6.1 页面初始化
 
 ```javascript
-async function publishImage(
-  page,
-  { title, content, imagePaths, tags = [], scheduleTime = null },
-) {
-  // 1. 打开发布页面
-  await page.goto(
-    "https://creator.xiaohongshu.com/publish/publish?source=official",
-  );
-  await page.waitForSelector("div.upload-content");
+async function initPublishPage(page) {
+  const url = "https://creator.xiaohongshu.com/publish/publish?source=official";
+
+  await page.goto(url);
+
+  // 等待页面加载
+  await page.waitForLoadState("load");
   await sleep(2000);
 
-  // 2. 点击"上传图文" TAB
-  const tabs = await page.$$("div.creator-tab");
-  for (const tab of tabs) {
-    const text = await tab.textContent();
-    if (text.trim() === "上传图文") {
-      // 检查是否被遮挡
+  // 等待 DOM 稳定
+  await page.waitForLoadState("domcontentloaded");
+  await sleep(1000);
+
+  // 等待上传区域出现
+  await page.waitForSelector("div.upload-content", { state: "visible" });
+}
+```
+
+#### 3.6.2 点击 TAB（处理弹窗遮挡）
+
+**关键问题**：页面可能有弹窗（`div.d-popover`）遮挡 TAB 按钮
+
+```javascript
+async function clickPublishTab(page, tabName) {
+  // tabName: "上传图文" 或 "上传视频"
+
+  const maxRetries = 15;
+  const retryInterval = 200;
+
+  for (let i = 0; i < maxRetries; i++) {
+    // 1. 查找所有 TAB 元素
+    const tabs = await page.$$("div.creator-tab");
+
+    for (const tab of tabs) {
+      // 检查元素是否可见
+      const isVisible = await tab.isVisible();
+      if (!isVisible) continue;
+
+      // 检查文本是否匹配
+      const text = await tab.textContent();
+      if (text.trim() !== tabName) continue;
+
+      // 2. 检查是否被遮挡
       const isBlocked = await tab.evaluate((el) => {
         const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return true;
+
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;
         const target = document.elementFromPoint(x, y);
         return !(target === el || el.contains(target));
       });
 
+      // 3. 如果被遮挡，移除弹窗
       if (isBlocked) {
-        // 移除遮挡弹窗
+        console.log("TAB 被遮挡，尝试移除弹窗");
         await page.evaluate(() => {
           const popover = document.querySelector("div.d-popover");
           if (popover) popover.remove();
         });
+        // 点击空白位置
+        await page.mouse.click(
+          380 + Math.random() * 100,
+          20 + Math.random() * 60,
+        );
         await sleep(200);
+        continue;
       }
 
+      // 4. 点击 TAB
       await tab.click();
-      break;
+      return true;
     }
-  }
-  await sleep(1000);
 
-  // 3. 逐张上传图片
-  for (let i = 0; i < imagePaths.length; i++) {
-    const selector = i === 0 ? ".upload-input" : 'input[type="file"]';
-    const input = await page.$(selector);
-    await input.setInputFiles(imagePaths[i]);
-
-    // 等待上传完成（预览元素数量达到 i+1）
-    await page.waitForFunction(
-      (expected) =>
-        document.querySelectorAll(".img-preview-area .pr").length >= expected,
-      { timeout: 60000 },
-      i + 1,
-    );
-    await sleep(1000);
+    await sleep(retryInterval);
   }
 
-  // 4. 输入标题
-  await page.fill("div.d-input input", title);
-  await sleep(500);
-
-  // 检查标题是否超长
-  const titleError = await page.$("div.title-container div.max_suffix");
-  if (titleError) {
-    const errorText = await titleError.textContent();
-    throw new Error(`标题超长: ${errorText}`);
-  }
-
-  // 5. 输入正文
-  const contentEl = await page.$("div.ql-editor");
-  await contentEl.fill(content);
-  await sleep(1000);
-
-  // 检查正文是否超长
-  const contentError = await page.$("div.edit-container div.length-error");
-  if (contentError) {
-    const errorText = await contentError.textContent();
-    throw new Error(`正文超长: ${errorText}`);
-  }
-
-  // 6. 输入标签（最多 10 个）
-  for (const tag of tags.slice(0, 10)) {
-    const cleanTag = tag.replace(/^#/, "");
-
-    // 移动到正文末尾
-    await contentEl.press("End");
-    await contentEl.press("Enter");
-    await contentEl.press("Enter");
-
-    // 输入 # 触发标签联想
-    await contentEl.type("#");
-    await sleep(200);
-
-    // 逐字输入标签
-    for (const char of cleanTag) {
-      await contentEl.type(char);
-      await sleep(50);
-    }
-    await sleep(1000);
-
-    // 点击第一个联想选项
-    const topicItem = await page.$("#creator-editor-topic-container .item");
-    if (topicItem) {
-      await topicItem.click();
-    } else {
-      await contentEl.type(" "); // 无联想则输入空格
-    }
-    await sleep(500);
-  }
-
-  // 7. 设置定时发布（可选）
-  if (scheduleTime) {
-    await page.click(".post-time-wrapper .d-switch");
-    await sleep(800);
-
-    const dateInput = await page.$(".date-picker-container input");
-    await dateInput.selectText();
-    await dateInput.fill(scheduleTime); // 格式：2024-01-15 10:30
-  }
-
-  // 8. 点击发布
-  await page.click(".publish-page-publish-btn button.bg-red");
-  await sleep(3000);
+  throw new Error(`未找到发布 TAB: ${tabName}`);
 }
 ```
 
-### 3.7 点赞/收藏
+#### 3.6.3 上传图片（逐张上传）
+
+**关键点**：
+
+- 第一张图片使用 `.upload-input` 选择器
+- 后续图片使用 `input[type="file"]` 选择器
+- 每张图片上传后，等待预览元素数量增加
+
+```javascript
+async function uploadImages(page, imagePaths) {
+  // 1. 验证文件存在
+  const validPaths = [];
+  for (const path of imagePaths) {
+    if (fs.existsSync(path)) {
+      validPaths.push(path);
+      console.log(`有效图片: ${path}`);
+    } else {
+      console.warn(`图片不存在: ${path}`);
+    }
+  }
+
+  if (validPaths.length === 0) {
+    throw new Error("没有有效的图片文件");
+  }
+
+  // 2. 逐张上传
+  for (let i = 0; i < validPaths.length; i++) {
+    const path = validPaths[i];
+
+    // 选择器：第一张用 .upload-input，后续用 input[type="file"]
+    const selector = i === 0 ? ".upload-input" : 'input[type="file"]';
+
+    const input = await page.$(selector);
+    if (!input) {
+      throw new Error(`未找到上传输入框 (第${i + 1}张)`);
+    }
+
+    // 设置文件
+    await input.setInputFiles(path);
+    console.log(`已提交上传: 第${i + 1}张 - ${path}`);
+
+    // 3. 等待上传完成（预览元素数量达到 i+1）
+    await waitForUploadComplete(page, i + 1);
+    await sleep(1000);
+  }
+}
+
+async function waitForUploadComplete(page, expectedCount) {
+  const maxWait = 60000; // 60秒超时
+  const interval = 500;
+  const startTime = Date.now();
+  let lastCount = expectedCount - 1;
+
+  while (Date.now() - startTime < maxWait) {
+    const previews = await page.$$(".img-preview-area .pr");
+    const currentCount = previews.length;
+
+    // 数量变化时打印日志
+    if (currentCount !== lastCount) {
+      console.log(`上传进度: ${currentCount}/${expectedCount}`);
+      lastCount = currentCount;
+    }
+
+    if (currentCount >= expectedCount) {
+      console.log(`第${expectedCount}张图片上传完成`);
+      return;
+    }
+
+    await sleep(interval);
+  }
+
+  throw new Error(`第${expectedCount}张图片上传超时(60s)`);
+}
+```
+
+#### 3.6.4 输入标题（检查长度）
+
+**标题限制**：最大 20 个单位长度（中文算 2，英文算 1）
+
+```javascript
+async function inputTitle(page, title) {
+  const titleInput = await page.$("div.d-input input");
+  if (!titleInput) {
+    throw new Error("未找到标题输入框");
+  }
+
+  await titleInput.fill(title);
+  await sleep(500);
+
+  // 检查是否超长
+  const maxSuffix = await page.$("div.title-container div.max_suffix");
+  if (maxSuffix) {
+    const errorText = await maxSuffix.textContent();
+    // 格式: "25/20" 表示当前25，最大20
+    const parts = errorText.split("/");
+    if (parts.length === 2) {
+      throw new Error(`标题超长: 当前${parts[0]}，最大${parts[1]}`);
+    }
+    throw new Error(`标题超长: ${errorText}`);
+  }
+
+  console.log("标题输入完成");
+}
+```
+
+#### 3.6.5 输入正文（检查长度）
+
+**正文输入框**：有两种可能的选择器
+
+- `div.ql-editor` - Quill 富文本编辑器
+- `p[data-placeholder*="输入正文描述"]` 的父级 `[role="textbox"]`
+
+```javascript
+async function inputContent(page, content) {
+  // 尝试两种选择器
+  let contentEl = await page.$("div.ql-editor");
+
+  if (!contentEl) {
+    // 备选方案：通过 placeholder 查找
+    const placeholderEl = await page.$('p[data-placeholder*="输入正文描述"]');
+    if (placeholderEl) {
+      // 向上查找 role="textbox" 的父元素
+      contentEl = await placeholderEl.evaluateHandle((el) => {
+        let current = el;
+        for (let i = 0; i < 5; i++) {
+          current = current.parentElement;
+          if (current && current.getAttribute("role") === "textbox") {
+            return current;
+          }
+        }
+        return null;
+      });
+    }
+  }
+
+  if (!contentEl) {
+    throw new Error("未找到正文输入框");
+  }
+
+  await contentEl.fill(content);
+  await sleep(1000);
+
+  // 检查是否超长
+  const lengthError = await page.$("div.edit-container div.length-error");
+  if (lengthError) {
+    const errorText = await lengthError.textContent();
+    const parts = errorText.split("/");
+    if (parts.length === 2) {
+      throw new Error(`正文超长: 当前${parts[0]}，最大${parts[1]}`);
+    }
+    throw new Error(`正文超长: ${errorText}`);
+  }
+
+  console.log("正文输入完成");
+  return contentEl; // 返回元素，后续输入标签需要
+}
+```
+
+#### 3.6.6 输入标签（使用标签联想）
+
+**标签输入流程**：
+
+1. 移动光标到正文末尾
+2. 按两次回车换行
+3. 输入 `#` 触发标签联想
+4. 逐字输入标签内容
+5. 等待联想下拉框出现
+6. 点击第一个联想选项（或输入空格）
+
+```javascript
+async function inputTags(page, contentEl, tags) {
+  if (!tags || tags.length === 0) return;
+
+  // 最多 10 个标签
+  const validTags = tags.slice(0, 10);
+
+  await sleep(1000);
+
+  // 移动到正文末尾，按多次下箭头确保到底部
+  for (let i = 0; i < 20; i++) {
+    await contentEl.press("ArrowDown");
+    await sleep(10);
+  }
+
+  // 按两次回车换行
+  await contentEl.press("Enter");
+  await contentEl.press("Enter");
+  await sleep(1000);
+
+  // 逐个输入标签
+  for (const tag of validTags) {
+    const cleanTag = tag.replace(/^#/, ""); // 移除开头的 #
+    await inputSingleTag(page, contentEl, cleanTag);
+  }
+}
+
+async function inputSingleTag(page, contentEl, tag) {
+  // 1. 输入 #
+  await contentEl.type("#");
+  await sleep(200);
+
+  // 2. 逐字输入标签
+  for (const char of tag) {
+    await contentEl.type(char);
+    await sleep(50);
+  }
+
+  await sleep(1000);
+
+  // 3. 查找标签联想容器
+  const topicContainer = await page.$("#creator-editor-topic-container");
+  if (!topicContainer) {
+    console.warn(`未找到标签联想下拉框，直接输入空格: ${tag}`);
+    await contentEl.type(" ");
+    return;
+  }
+
+  // 4. 查找第一个联想选项
+  const firstItem = await topicContainer.$(".item");
+  if (!firstItem) {
+    console.warn(`未找到标签联想选项，直接输入空格: ${tag}`);
+    await contentEl.type(" ");
+    return;
+  }
+
+  // 5. 点击联想选项
+  await firstItem.click();
+  console.log(`成功点击标签联想: ${tag}`);
+
+  await sleep(500);
+}
+```
+
+#### 3.6.7 设置定时发布
+
+**定时发布限制**：1 小时后 ~ 14 天内
+
+```javascript
+async function setSchedulePublish(page, scheduleTime) {
+  // scheduleTime: Date 对象或 "YYYY-MM-DD HH:mm" 字符串
+
+  // 1. 点击定时发布开关
+  const switchEl = await page.$(".post-time-wrapper .d-switch");
+  if (!switchEl) {
+    throw new Error("未找到定时发布开关");
+  }
+  await switchEl.click();
+  await sleep(800);
+
+  // 2. 格式化时间
+  const dateTimeStr =
+    typeof scheduleTime === "string"
+      ? scheduleTime
+      : formatDateTime(scheduleTime);
+
+  // 3. 输入时间
+  const dateInput = await page.$(".date-picker-container input");
+  if (!dateInput) {
+    throw new Error("未找到日期时间输入框");
+  }
+
+  // 选中现有文本并替换
+  await dateInput.click({ clickCount: 3 }); // 三击全选
+  await dateInput.fill(dateTimeStr);
+
+  console.log(`定时发布设置完成: ${dateTimeStr}`);
+}
+
+function formatDateTime(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+```
+
+#### 3.6.8 点击发布按钮
+
+```javascript
+async function clickPublishButton(page) {
+  const publishBtn = await page.$(".publish-page-publish-btn button.bg-red");
+  if (!publishBtn) {
+    throw new Error("未找到发布按钮");
+  }
+
+  await publishBtn.click();
+  await sleep(3000);
+
+  console.log("已点击发布按钮");
+}
+```
+
+#### 3.6.9 完整发布图文函数
+
+```javascript
+async function publishImage(
+  page,
+  { title, content, imagePaths, tags = [], scheduleTime = null },
+) {
+  // 1. 初始化发布页面
+  await initPublishPage(page);
+
+  // 2. 点击"上传图文" TAB
+  await clickPublishTab(page, "上传图文");
+  await sleep(1000);
+
+  // 3. 上传图片
+  await uploadImages(page, imagePaths);
+
+  // 4. 输入标题
+  await inputTitle(page, title);
+  await sleep(1000);
+
+  // 5. 输入正文
+  const contentEl = await inputContent(page, content);
+
+  // 6. 输入标签
+  await inputTags(page, contentEl, tags);
+  await sleep(1000);
+
+  // 7. 设置定时发布（可选）
+  if (scheduleTime) {
+    await setSchedulePublish(page, scheduleTime);
+  }
+
+  // 8. 点击发布
+  await clickPublishButton(page);
+}
+```
+
+---
+
+### 3.7 发布视频（详细版）
+
+**与图文的主要区别**：
+
+1. TAB 名称为"上传视频"
+2. 只上传一个视频文件
+3. 视频处理时间更长（最多等待 10 分钟）
+4. 需要等待发布按钮变为可点击状态
+
+#### 3.7.1 上传视频
+
+```javascript
+async function uploadVideo(page, videoPath) {
+  // 1. 验证文件存在
+  if (!fs.existsSync(videoPath)) {
+    throw new Error(`视频文件不存在: ${videoPath}`);
+  }
+
+  // 2. 查找上传输入框
+  let fileInput = await page.$(".upload-input");
+  if (!fileInput) {
+    fileInput = await page.$('input[type="file"]');
+  }
+  if (!fileInput) {
+    throw new Error("未找到视频上传输入框");
+  }
+
+  // 3. 设置文件
+  await fileInput.setInputFiles(videoPath);
+  console.log(`已提交视频上传: ${videoPath}`);
+
+  // 4. 等待视频处理完成（发布按钮变为可点击）
+  await waitForPublishButtonClickable(page);
+}
+```
+
+#### 3.7.2 等待发布按钮可点击
+
+**视频处理可能需要较长时间**，需要等待发布按钮从禁用状态变为可点击状态。
+
+```javascript
+async function waitForPublishButtonClickable(page) {
+  const maxWait = 10 * 60 * 1000; // 10 分钟
+  const interval = 1000;
+  const startTime = Date.now();
+  const selector = ".publish-page-publish-btn button.bg-red";
+
+  console.log("开始等待发布按钮可点击（视频处理中）...");
+
+  while (Date.now() - startTime < maxWait) {
+    const btn = await page.$(selector);
+    if (btn) {
+      // 检查是否可见
+      const isVisible = await btn.isVisible();
+      if (!isVisible) {
+        await sleep(interval);
+        continue;
+      }
+
+      // 检查是否禁用
+      const disabled = await btn.getAttribute("disabled");
+      if (disabled !== null) {
+        await sleep(interval);
+        continue;
+      }
+
+      // 检查 class 是否包含 disabled
+      const className = await btn.getAttribute("class");
+      if (className && className.includes("disabled")) {
+        await sleep(interval);
+        continue;
+      }
+
+      console.log("视频处理完成，发布按钮可点击");
+      return btn;
+    }
+
+    await sleep(interval);
+  }
+
+  throw new Error("等待发布按钮可点击超时（10分钟）");
+}
+```
+
+#### 3.7.3 完整发布视频函数
+
+```javascript
+async function publishVideo(
+  page,
+  { title, content, videoPath, tags = [], scheduleTime = null },
+) {
+  // 1. 初始化发布页面
+  await initPublishPage(page);
+
+  // 2. 点击"上传视频" TAB
+  await clickPublishTab(page, "上传视频");
+  await sleep(1000);
+
+  // 3. 上传视频（会等待处理完成）
+  await uploadVideo(page, videoPath);
+
+  // 4. 输入标题
+  await inputTitle(page, title);
+  await sleep(1000);
+
+  // 5. 输入正文
+  const contentEl = await inputContent(page, content);
+
+  // 6. 输入标签
+  await inputTags(page, contentEl, tags);
+  await sleep(1000);
+
+  // 7. 设置定时发布（可选）
+  if (scheduleTime) {
+    await setSchedulePublish(page, scheduleTime);
+  }
+
+  // 8. 等待发布按钮可点击并点击
+  const publishBtn = await waitForPublishButtonClickable(page);
+  await publishBtn.click();
+  await sleep(3000);
+
+  console.log("视频发布完成");
+}
+```
+
+---
+
+### 3.8 发布功能 DOM 选择器汇总
+
+| 元素           | 选择器                                    | 说明                         |
+| -------------- | ----------------------------------------- | ---------------------------- |
+| 上传区域容器   | `div.upload-content`                      | 等待页面加载                 |
+| TAB 按钮       | `div.creator-tab`                         | 文本为"上传图文"或"上传视频" |
+| 弹窗遮挡       | `div.d-popover`                           | 需要移除                     |
+| 首张图片上传   | `.upload-input`                           | 第一张图片/视频              |
+| 后续图片上传   | `input[type="file"]`                      | 第 2 张及以后                |
+| 图片预览       | `.img-preview-area .pr`                   | 统计已上传数量               |
+| 标题输入框     | `div.d-input input`                       | 标题                         |
+| 标题超长提示   | `div.title-container div.max_suffix`      | 格式: "25/20"                |
+| 正文输入框(主) | `div.ql-editor`                           | Quill 编辑器                 |
+| 正文输入框(备) | `p[data-placeholder*="输入正文描述"]`     | 向上找 textbox               |
+| 正文超长提示   | `div.edit-container div.length-error`     | 格式: "1500/1000"            |
+| 标签联想容器   | `#creator-editor-topic-container`         | 标签下拉框                   |
+| 标签联想选项   | `#creator-editor-topic-container .item`   | 第一个选项                   |
+| 定时发布开关   | `.post-time-wrapper .d-switch`            | 开关按钮                     |
+| 定时输入框     | `.date-picker-container input`            | 格式: YYYY-MM-DD HH:mm       |
+| 发布按钮       | `.publish-page-publish-btn button.bg-red` | 红色发布按钮                 |
+
+---
+
+### 3.9 发布功能常见问题
+
+#### Q1: TAB 点击无效
+
+**原因**：页面有弹窗（`div.d-popover`）遮挡
+**解决**：移除弹窗元素，或点击空白位置关闭
+
+#### Q2: 图片上传超时
+
+**原因**：网络慢或图片太大
+**解决**：增加超时时间，或压缩图片
+
+#### Q3: 标题/正文超长
+
+**原因**：超过字数限制
+**解决**：检查 `div.max_suffix` 或 `div.length-error` 元素
+
+#### Q4: 标签联想不出现
+
+**原因**：输入太快或网络延迟
+**解决**：增加输入间隔，或直接输入空格跳过
+
+#### Q5: 视频处理超时
+
+**原因**：视频太大或服务器繁忙
+**解决**：增加等待时间（默认 10 分钟）
+
+#### Q6: 发布按钮不可点击
+
+**原因**：内容未填写完整或正在处理中
+**解决**：检查必填项，等待处理完成
 
 **页面 URL**: `https://www.xiaohongshu.com/explore/{feedID}?xsec_token={xsecToken}&xsec_source=pc_feed`
 

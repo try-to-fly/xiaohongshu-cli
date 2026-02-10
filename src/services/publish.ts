@@ -9,38 +9,73 @@ interface PublishOptions {
   scheduleTime?: string;
 }
 
-export async function publishImage(page: Page, options: PublishOptions): Promise<void> {
-  const { title, content, imagePaths, tags = [], scheduleTime } = options;
+// 点击"上传图文" TAB（带重试机制）
+async function clickPublishTab(page: Page, tabName: string): Promise<void> {
+  const maxRetries = 15;
+  const retryInterval = 200;
 
-  await page.goto('https://creator.xiaohongshu.com/publish/publish?source=official');
-  await page.waitForSelector('div.upload-content');
-  await sleep(2000);
+  for (let i = 0; i < maxRetries; i++) {
+    const tabs = await page.$$('div.creator-tab');
 
-  // 点击"上传图文" TAB
-  const tabs = await page.$$('div.creator-tab');
-  for (const tab of tabs) {
-    const text = await tab.textContent();
-    if (text?.trim() === '上传图文') {
+    for (const tab of tabs) {
+      // 检查元素是否可见
+      const isVisible = await tab.isVisible();
+      if (!isVisible) continue;
+
+      // 检查文本是否匹配
+      const text = await tab.textContent();
+      if (text?.trim() !== tabName) continue;
+
+      // 检查是否被遮挡
       const isBlocked = await tab.evaluate((el) => {
         const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return true;
+
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;
         const target = document.elementFromPoint(x, y);
         return !(target === el || el.contains(target));
       });
 
+      // 如果被遮挡，移除弹窗并点击空白位置
       if (isBlocked) {
         await page.evaluate(() => {
           const popover = document.querySelector('div.d-popover');
           if (popover) popover.remove();
         });
+        // 点击空白位置关闭可能的弹窗
+        await page.mouse.click(
+          380 + Math.random() * 100,
+          20 + Math.random() * 60
+        );
         await sleep(200);
+        continue; // 重新检查
       }
 
+      // 点击 TAB
       await tab.click();
-      break;
+      return;
     }
+
+    await sleep(retryInterval);
   }
+
+  throw new Error(`未找到发布 TAB: ${tabName}`);
+}
+
+export async function publishImage(page: Page, options: PublishOptions): Promise<void> {
+  const { title, content, imagePaths, tags = [], scheduleTime } = options;
+
+  // 改进页面加载等待
+  await page.goto('https://creator.xiaohongshu.com/publish/publish?source=official');
+  await page.waitForLoadState('load');
+  await sleep(2000);
+  await page.waitForLoadState('domcontentloaded');
+  await sleep(1000);
+  await page.waitForSelector('div.upload-content', { state: 'visible' });
+
+  // 点击"上传图文" TAB（使用带重试机制的函数）
+  await clickPublishTab(page, '上传图文');
   await sleep(1000);
 
   // 逐张上传图片
@@ -88,9 +123,15 @@ export async function publishImage(page: Page, options: PublishOptions): Promise
     const cleanTag = tag.replace(/^#/, '');
 
     if (contentEl) {
-      await contentEl.press('End');
+      // 使用 ArrowDown 确保光标移动到正文末尾
+      for (let j = 0; j < 20; j++) {
+        await contentEl.press('ArrowDown');
+        await sleep(10);
+      }
       await contentEl.press('Enter');
       await contentEl.press('Enter');
+      await sleep(1000);
+
       await contentEl.type('#');
       await sleep(200);
 
@@ -102,6 +143,8 @@ export async function publishImage(page: Page, options: PublishOptions): Promise
 
       const topicItem = await page.$('#creator-editor-topic-container .item');
       if (topicItem) {
+        await topicItem.scrollIntoViewIfNeeded();
+        await sleep(200);
         await topicItem.click();
       } else {
         await contentEl.type(' ');
@@ -112,7 +155,12 @@ export async function publishImage(page: Page, options: PublishOptions): Promise
 
   // 设置定时发布
   if (scheduleTime) {
-    await page.click('.post-time-wrapper .d-switch');
+    const switchBtn = await page.$('.post-time-wrapper .d-switch');
+    if (switchBtn) {
+      await switchBtn.scrollIntoViewIfNeeded();
+      await sleep(200);
+      await switchBtn.click();
+    }
     await sleep(800);
 
     const dateInput = await page.$('.date-picker-container input');
@@ -123,6 +171,11 @@ export async function publishImage(page: Page, options: PublishOptions): Promise
   }
 
   // 点击发布
-  await page.click('.publish-page-publish-btn button.bg-red');
+  const publishBtn = await page.$('.publish-page-publish-btn button.bg-red');
+  if (publishBtn) {
+    await publishBtn.scrollIntoViewIfNeeded();
+    await sleep(300);
+    await publishBtn.click();
+  }
   await sleep(3000);
 }
