@@ -4,6 +4,7 @@ import ora from 'ora';
 import qrcode from 'qrcode-terminal';
 import { browserService, checkLoginStatus, getQrcode, waitForLogin } from '../services/index.js';
 import { deleteCookies } from '../utils/cookies.js';
+import { decodeQRCodeFromBase64 } from '../utils/qrcode.js';
 
 export function registerLoginCommands(program: Command): void {
   const login = program.command('login').description('登录管理');
@@ -51,14 +52,14 @@ export function registerLoginCommands(program: Command): void {
         spinner.stop();
 
         if (result.qrcode) {
-          // 从 base64 提取数据并显示二维码
-          const base64Data = result.qrcode.replace(/^data:image\/\w+;base64,/, '');
           console.log(chalk.cyan('\n请使用小红书 APP 扫描以下二维码登录:\n'));
 
-          // 如果是 base64 图片，提示用户查看浏览器
-          if (result.qrcode.startsWith('data:image')) {
-            console.log(chalk.yellow('二维码为图片格式，请查看浏览器窗口扫码'));
-            console.log(chalk.gray('提示: 使用 --no-headless 参数可显示浏览器窗口\n'));
+          const qrcodeContent = await decodeQRCodeFromBase64(result.qrcode);
+
+          if (qrcodeContent) {
+            qrcode.generate(qrcodeContent, { small: true });
+          } else {
+            console.log(chalk.yellow('二维码解码失败，请使用 --no-headless 参数显示浏览器窗口扫码'));
           }
         }
 
