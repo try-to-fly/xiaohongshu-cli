@@ -29,48 +29,48 @@ npm link
 
 ```bash
 # 检查登录状态
-xhs login status
+xhs-cli login status
 
 # 二维码登录
-xhs login qrcode
+xhs-cli login qrcode
 
 # 显示浏览器窗口扫码
-xhs login qrcode --no-headless
+xhs-cli login qrcode --no-headless
 
 # 退出登录（删除 Cookie）
-xhs login logout
+xhs-cli login logout
 ```
 
 ### 获取 Feed
 
 ```bash
 # 获取首页推荐列表
-xhs feed list
+xhs-cli feed list
 
 # 限制显示数量
-xhs feed list -n 5
+xhs-cli feed list -n 5
 
 # 输出 JSON 格式
-xhs feed list --json
+xhs-cli feed list --json
 
 # 获取笔记详情
-xhs feed detail <feedId> -t <xsecToken>
+xhs-cli feed detail <feedId> -t <xsecToken>
 
 # 获取详情并加载全部评论
-xhs feed detail <feedId> -t <xsecToken> --comments
+xhs-cli feed detail <feedId> -t <xsecToken> --comments
 ```
 
 ### 搜索
 
 ```bash
 # 搜索笔记
-xhs search "关键词"
+xhs-cli search "关键词"
 
 # 带筛选条件搜索
-xhs search "关键词" --sort 最新 --type 图文 --time 一周内
+xhs-cli search "关键词" --sort 最新 --type 图文 --time 一周内
 
 # 输出 JSON 格式
-xhs search "关键词" --json -n 20
+xhs-cli search "关键词" --json -n 20
 ```
 
 **筛选选项：**
@@ -82,45 +82,45 @@ xhs search "关键词" --json -n 20
 
 ```bash
 # 获取用户主页信息
-xhs user profile <userId> -t <xsecToken>
+xhs-cli user profile <userId> -t <xsecToken>
 
 # 输出 JSON 格式
-xhs user profile <userId> -t <xsecToken> --json
+xhs-cli user profile <userId> -t <xsecToken> --json
 ```
 
 ### 互动操作
 
 ```bash
 # 点赞
-xhs interact like <feedId> -t <xsecToken>
+xhs-cli interact like <feedId> -t <xsecToken>
 
 # 取消点赞
-xhs interact unlike <feedId> -t <xsecToken>
+xhs-cli interact unlike <feedId> -t <xsecToken>
 
 # 收藏
-xhs interact favorite <feedId> -t <xsecToken>
+xhs-cli interact favorite <feedId> -t <xsecToken>
 
 # 取消收藏
-xhs interact unfavorite <feedId> -t <xsecToken>
+xhs-cli interact unfavorite <feedId> -t <xsecToken>
 
 # 发表评论
-xhs interact comment <feedId> -t <xsecToken> -c "评论内容"
+xhs-cli interact comment <feedId> -t <xsecToken> -c "评论内容"
 ```
 
 ### 发布笔记
 
 ```bash
 # 发布图文笔记
-xhs publish --title "标题" --content "正文内容" --images ./img1.jpg ./img2.jpg
+xhs-cli publish --title "标题" --content "正文内容" --images ./img1.jpg ./img2.jpg
 
 # 带标签发布
-xhs publish --title "标题" --content "正文" --images ./img.jpg --tags 标签1 标签2
+xhs-cli publish --title "标题" --content "正文" --images ./img.jpg --tags 标签1 标签2
 
 # 定时发布
-xhs publish --title "标题" --content "正文" --images ./img.jpg --schedule "2024-12-25 10:00"
+xhs-cli publish --title "标题" --content "正文" --images ./img.jpg --schedule "2024-12-25 10:00"
 
 # 显示浏览器窗口
-xhs publish --title "标题" --content "正文" --images ./img.jpg --no-headless
+xhs-cli publish --title "标题" --content "正文" --images ./img.jpg --no-headless
 ```
 
 ## 通用选项

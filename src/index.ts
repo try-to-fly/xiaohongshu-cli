@@ -14,7 +14,7 @@ import {
 const program = new Command();
 
 program
-  .name('xhs')
+  .name('xhs-cli')
   .description('小红书命令行工具')
   .version('1.0.0');
 
